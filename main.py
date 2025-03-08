@@ -142,8 +142,8 @@ def draw_overlay(frame, status="Ready", question="", ocr_text="", model_response
     keybinds = [
         "Controls:",
         "SPACE - Capture & Analyze",
-        "Q - Quit",
         "C - Clear Results",
+        "Q - Quit",
     ]
 
     for i, bind in enumerate(keybinds):
