@@ -1,13 +1,12 @@
 import os
 import time
-
 import cv2
 
-from config import logger
+from config import logger, gemini_client, OCR_MODEL
 from model_responses import get_all_model_responses
 
 
-async def process_frame(frame, client, result_queue):
+async def process_frame(frame, result_queue):
     filename = f"capture_{time.strftime('%Y%m%d_%H%M%S')}.jpg"
     logger.info("Starting frame processing")
 
@@ -19,14 +18,14 @@ async def process_frame(frame, client, result_queue):
 
         start_time = time.perf_counter()
         try:
-            file = client.files.upload(file=filename)
+            file = gemini_client.files.upload(file=filename)
         except Exception as e:
             logger.error(f"Failed to upload file: {str(e)}")
             result_queue.put(("error", f"Failed to upload file: {str(e)}"))
             return False
 
-        detected = client.models.generate_content(
-            model="gemini-2.0-flash-001",
+        detected = gemini_client.models.generate_content(
+            model=OCR_MODEL,
             contents=[
                 """Extract text from this image:
 If it's a multiple choice question, format as:

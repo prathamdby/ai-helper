@@ -52,15 +52,14 @@ def draw_overlay(frame, status="Ready", question="", ocr_text="", model_response
             for i, (model, (answer, time_taken)) in enumerate(model_responses.items()):
                 model_name = model.split("/")[0]
                 a_y = height - 100 + (i * 30)
-                # Use different colors and styles for different states (BGR format)
                 if answer == "-":
-                    color = (71, 177, 255)  # Orange for processing (BGR)
+                    color = (71, 177, 255)
                     time_text = " (Processing...)"
                 elif answer.startswith("Error"):
-                    color = (0, 0, 255)  # Red for errors (BGR)
+                    color = (0, 0, 255)
                     time_text = ""
                 else:
-                    color = (255, 255, 102)  # Light cyan for successful responses (BGR)
+                    color = (255, 255, 102)
                     time_text = f" ({time_taken:.2f}s)"
 
                 draw_text(

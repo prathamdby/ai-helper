@@ -1,28 +1,31 @@
 import cv2
-from queue import Queue
-import os
 import time
+from queue import Queue
 
-from config import logger
+from config import (
+    logger,
+    CAMERA_WIDTH,
+    CAMERA_HEIGHT,
+    CAMERA_FPS,
+    CAPTURE_COOLDOWN,
+)
 from drawing import draw_overlay
-from google import genai
 from processing_thread import ProcessingThread
 
 
 def main():
     logger.info("Starting application")
     cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-    cap.set(cv2.CAP_PROP_FPS, 30)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+    cap.set(cv2.CAP_PROP_FPS, CAMERA_FPS)
 
     if not cap.isOpened():
         logger.critical("Failed to open camera")
         return
 
-    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
     result_queue = Queue()
-    processing_thread = ProcessingThread(result_queue, client)
+    processing_thread = ProcessingThread(result_queue)
     processing_thread.start()
 
     status = "Ready"
@@ -31,7 +34,6 @@ def main():
     current_ocr = ""
     current_responses = None
     last_capture_time = 0
-    CAPTURE_COOLDOWN = 1.0
 
     while True:
         ret, frame = cap.read()

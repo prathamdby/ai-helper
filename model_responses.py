@@ -1,21 +1,9 @@
 import asyncio
-import os
 import time
 from queue import Queue
 from typing import Tuple
 
-from config import logger
-from openai import OpenAI
-
-client = OpenAI(
-    base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_API_KEY")
-)
-
-MODELS = [
-    "deepseek/deepseek-chat:free",
-    "qwen/qwq-32b:free",
-    "google/gemini-2.0-pro-exp-02-05:free",
-]
+from config import logger, openai_client as client, MODELS
 
 
 async def get_model_response(
