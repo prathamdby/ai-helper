@@ -10,14 +10,11 @@ from dotenv import load_dotenv
 from google import genai
 from openai import OpenAI
 
-
 load_dotenv()
-
 
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_API_KEY")
 )
-
 
 MODELS = [
     "deepseek/deepseek-chat:free",
@@ -142,7 +139,12 @@ def draw_text(frame, text, position, color=(255, 255, 255), scale=0.7):
 
 def draw_overlay(frame, status="Ready", question="", ocr_text="", model_responses=None):
     height, width = frame.shape[:2]
-    keybinds = ["Controls:", "SPACE - Capture & Analyze", "Q - Quit"]
+    keybinds = [
+        "Controls:",
+        "SPACE - Capture & Analyze",
+        "Q - Quit",
+        "C - Clear Results",
+    ]
 
     for i, bind in enumerate(keybinds):
         draw_text(frame, bind, (20, 30 + i * 35), color=(0, 255, 0), scale=0.5)
@@ -195,13 +197,18 @@ Options: <options>
 If it's a regular question, format as:
 Question: <question>
 
-Important: Always start with 'Question:' even for simple questions.""",
+ONLY return a Question: line if you detect an actual question in the image.
+If no question is detected, return empty string.""",
                 file,
             ],
         ).text.strip()
 
         if not detected:
             raise Exception("No question detected in image")
+
+        # Check if the text actually contains a question structure
+        if "Question:" not in detected:
+            raise Exception("No question found in the image")
 
         question = ""
         options = ""
@@ -311,6 +318,11 @@ def main():
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
             break
+        elif key == ord("c"):  # Clear results
+            current_question = ""
+            current_ocr = ""
+            current_responses = None
+            status = "Ready"
         elif key == ord(" ") and not is_processing:
             current_time = time.time()
             if current_time - last_capture_time >= CAPTURE_COOLDOWN:
