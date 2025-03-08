@@ -27,31 +27,58 @@ A computer vision application that captures images through your camera and uses 
 
 1. Clone the repository:
 
-   ```bash
+   ```shell
    git clone https://github.com/prathamdby/ai-helper.git
    cd ai-helper
    ```
 
-2. Create and activate a virtual environment:
+2. Create a virtual environment:
 
-   ```bash
+   ```shell
    python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
-3. Install dependencies:
-   ```bash
-   # Using pip with requirements.txt
+3. Activate the virtual environment:
+
+   On Windows:
+
+   ```shell
+   venv\Scripts\activate
+   ```
+
+   On macOS/Linux:
+
+   ```shell
+   source venv/bin/activate
+   ```
+
+4. Install dependencies:
+
+   Using pip:
+
+   ```shell
    pip install -r requirements.txt
-   # OR using uv (faster)
+   ```
+
+   Or using uv (faster):
+
+   ```shell
    uv pip install -r requirements.txt
    ```
 
 ## Configuration
 
-1. Copy the example environment file:
+1. Create a new .env file:
 
-   ```bash
+   On Windows:
+
+   ```shell
+   copy .env.example .env
+   ```
+
+   On macOS/Linux:
+
+   ```shell
    cp .env.example .env
    ```
 
@@ -66,8 +93,16 @@ A computer vision application that captures images through your camera and uses 
 
 2. Run the application:
 
-   ```bash
+   On Windows/macOS:
+
+   ```shell
    python main.py
+   ```
+
+   On some Linux systems:
+
+   ```shell
+   python3 main.py
    ```
 
 3. Controls:
