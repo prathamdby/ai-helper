@@ -10,9 +10,11 @@ def draw_text(frame, text, position, color=(255, 255, 255), scale=0.7):
     font = cv2.FONT_HERSHEY_SIMPLEX
     thickness = 2
     padding = 10
+
     for i, line in enumerate(text.split("\n")):
         y = position[1] + i * int(30 * scale)
         (text_width, text_height) = cv2.getTextSize(line, font, scale, thickness)[0]
+
         cv2.rectangle(
             frame,
             (position[0] - padding, y - text_height - padding),
@@ -20,23 +22,28 @@ def draw_text(frame, text, position, color=(255, 255, 255), scale=0.7):
             (0, 0, 0),
             -1,
         )
+
         cv2.putText(frame, line, (position[0], y), font, scale, color, thickness)
 
 
 def draw_overlay(frame, status="Ready", result_text=""):
     height, width = frame.shape[:2]
     keybinds = ["Controls:", "SPACE - Capture & Analyze", "Q - Quit"]
+
     for i, bind in enumerate(keybinds):
         draw_text(frame, bind, (20, 30 + i * 35), color=(0, 255, 0), scale=0.5)
+
     status_text = f"Status: {status}"
     text_size = cv2.getTextSize(status_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
     status_x = width - text_size[0] - 40
     draw_text(frame, status_text, (status_x, 30), color=(255, 255, 0))
+
     if result_text:
         lines = [line.strip() for line in result_text.split("\n")]
         q_y = height - 150
         q_x = width // 2 - 400
         draw_text(frame, lines[0], (q_x, q_y), color=(255, 255, 255))
+
         if len(lines) > 1:
             a_y = height - 80
             a_x = width // 2 - 400
@@ -45,9 +52,11 @@ def draw_overlay(frame, status="Ready", result_text=""):
 
 def process_frame(frame, client):
     filename = f"capture_{datetime.datetime.now():%Y%m%d_%H%M%S}.jpg"
+
     try:
         if not cv2.imwrite(filename, frame):
             raise Exception("Failed to save image")
+
         file = client.files.upload(file=filename)
         detected = client.models.generate_content(
             model="gemini-2.0-flash-001",
@@ -64,10 +73,10 @@ Important: Always start with 'Question:' even for simple questions.""",
                 file,
             ],
         ).text.strip()
+
         if not detected:
             raise Exception("No question detected in image")
 
-        # Extract question and options
         question = ""
         options = ""
         for line in detected.split("\n"):
@@ -79,7 +88,6 @@ Important: Always start with 'Question:' even for simple questions.""",
         if not question:
             raise Exception("Failed to extract question")
 
-        # Format the prompt based on whether options are present
         if options:
             prompt = f"""Multiple Choice Question:
 {question}
@@ -100,18 +108,22 @@ Instructions:
 
         answer = (
             client.models.generate_content(
-                model="gemini-2.0-flash-lite",
+                model="gemini-2.0-flash-001",
                 contents=[prompt],
             )
             .text.strip()
             .split()[0]
-        )  # Take only the first word
+        )
+
         if not answer:
             raise Exception("Failed to generate answer")
+
         question_display = f"{question}\n{options}" if options else question
         return True, f"Q: {question_display}\nA: {answer}"
+
     except Exception as e:
         return False, f"Error: {str(e)}"
+
     finally:
         try:
             if os.path.exists(filename):
@@ -148,26 +160,32 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     cap.set(cv2.CAP_PROP_FPS, 30)
+
     client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
     result_queue = Queue()
     processing_thread = ProcessingThread(result_queue, client)
     processing_thread.start()
+
     result_text = ""
     status = "Ready"
     is_processing = False
+
     while True:
         ret, frame = cap.read()
         if not ret:
             break
+
         if not result_queue.empty():
             success, new_result = result_queue.get()
             status = "Ready" if success else "Error"
             if success:
                 result_text = new_result
             is_processing = False
+
         display_frame = frame.copy()
         draw_overlay(display_frame, status, result_text)
         cv2.imshow("Live Camera Feed", display_frame)
+
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
             break
@@ -175,6 +193,7 @@ def main():
             status = "Processing..."
             is_processing = True
             processing_thread.process(frame)
+
     processing_thread.stop()
     processing_thread.join()
     cap.release()
