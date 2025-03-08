@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "ai-helper"
 version = "0.1.0"
@@ -5,7 +9,6 @@ description = "A computer vision application that uses Google's Gemini AI to ana
 authors = [
     { name = "Pratham Dubey", email = "prathamdby@users.noreply.github.com" }
 ]
-repository = "https://github.com/prathamdby/ai-helper"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -14,3 +17,9 @@ dependencies = [
     "opencv-python>=4.11.0.86",
     "python-dotenv>=1.0.1",
 ]
+
+[project.urls]
+Repository = "https://github.com/prathamdby/ai-helper"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
