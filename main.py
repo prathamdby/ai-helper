@@ -34,7 +34,7 @@ async def get_model_response(
             return False
         if is_mcq:
             return len(ans.strip()) == 1 and ans.strip().upper() in ["A", "B", "C", "D"]
-        return len(ans.split()) <= 5  # Allow up to 5 words for concise answers
+        return len(ans.split()) > 0
 
     try:
         for attempt in range(MAX_RETRIES + 1):
