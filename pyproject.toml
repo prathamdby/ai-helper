@@ -9,7 +9,9 @@ repository = "https://github.com/prathamdby/ai-helper"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "aiohttp>=3.11.13",
     "google-genai>=1.5.0",
+    "openai>=1.65.4",
     "opencv-python>=4.11.0.86",
     "python-dotenv>=1.0.1",
 ]

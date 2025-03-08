@@ -1,9 +1,122 @@
-import cv2
-import datetime
-from google import genai
+import asyncio
 import os
+import time
 from queue import Queue
 from threading import Thread
+from typing import Dict, Tuple
+
+import cv2
+from dotenv import load_dotenv
+from google import genai
+from openai import OpenAI
+
+
+load_dotenv()
+
+
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_API_KEY")
+)
+
+
+MODELS = [
+    "deepseek/deepseek-chat:free",
+    "qwen/qwq-32b:free",
+    "google/gemini-2.0-pro-exp-02-05:free",
+]
+
+
+async def get_model_response(
+    question: str, options: str, model: str
+) -> Tuple[bool, str, float]:
+    MAX_RETRIES = 2
+    start_time = time.perf_counter()
+
+    def validate_answer(ans: str, is_mcq: bool) -> bool:
+        if not ans:
+            return False
+        if is_mcq:
+            return len(ans.strip()) == 1 and ans.strip().upper() in ["A", "B", "C", "D"]
+        return len(ans.split()) == 1
+
+    try:
+        for attempt in range(MAX_RETRIES + 1):
+            if options:
+                prompt = f"""Multiple Choice Question:
+{question}
+{options}
+
+Instructions:
+1. ONLY respond with the letter (A, B, C, or D) of the correct option
+2. Do not write the full answer or any explanation
+3. Just the letter, nothing else
+
+You must respond with just A, B, C, or D."""
+            else:
+                prompt = f"""Answer this question with EXACTLY one word:
+{question}
+
+Instructions:
+1. If it's a factual question (like capitals, dates, names), give the exact correct answer
+2. The answer MUST be a single word - no explanations, articles (a/an/the), or additional text
+3. Proper nouns should be capitalized (e.g., Delhi, Paris, Einstein)
+
+You must respond with exactly one word."""
+
+            try:
+                completion = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": "You are a precise answering system that follows instructions exactly.",
+                            },
+                            {"role": "user", "content": prompt},
+                        ],
+                        temperature=0.3,  # Lower temperature for more focused responses
+                    ),
+                )
+                answer = completion.choices[0].message.content.strip()
+
+                if validate_answer(answer, bool(options)):
+                    elapsed_time = time.perf_counter() - start_time
+                    return True, answer.upper() if options else answer, elapsed_time
+
+                if attempt < MAX_RETRIES:
+                    continue
+
+                return True, "Invalid response" if options else "Unknown", elapsed_time
+
+            except Exception as e:
+                if attempt < MAX_RETRIES:
+                    await asyncio.sleep(1)  # Brief delay before retry
+                    continue
+                raise e
+    except Exception as e:
+        elapsed_time = time.perf_counter() - start_time
+        return False, f"Error ({model.split('/')[-1]}): {str(e)}", elapsed_time
+
+
+async def get_all_model_responses(
+    question: str, options: str
+) -> Dict[str, Tuple[str, float]]:
+    tasks = []
+    for model in MODELS:
+        tasks.append(get_model_response(question, options, model))
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    responses = {}
+    for i, result in enumerate(results):
+        model_name = MODELS[i]
+        if isinstance(result, tuple) and result[0]:
+            responses[model_name] = (result[1], result[2])
+        elif isinstance(result, Exception):
+            responses[model_name] = (f"Error: {str(result)}", 0.0)
+        else:
+            responses[model_name] = (f"Error: Failed to get response", 0.0)
+    return responses
 
 
 def draw_text(frame, text, position, color=(255, 255, 255), scale=0.7):
@@ -26,7 +139,7 @@ def draw_text(frame, text, position, color=(255, 255, 255), scale=0.7):
         cv2.putText(frame, line, (position[0], y), font, scale, color, thickness)
 
 
-def draw_overlay(frame, status="Ready", result_text=""):
+def draw_overlay(frame, status="Ready", question="", ocr_text="", model_responses=None):
     height, width = frame.shape[:2]
     keybinds = ["Controls:", "SPACE - Capture & Analyze", "Q - Quit"]
 
@@ -38,25 +151,37 @@ def draw_overlay(frame, status="Ready", result_text=""):
     status_x = width - text_size[0] - 40
     draw_text(frame, status_text, (status_x, 30), color=(255, 255, 0))
 
-    if result_text:
-        lines = [line.strip() for line in result_text.split("\n")]
+    if question:
+        ocr_y = height - 200
+        draw_text(
+            frame, f"OCR: {ocr_text}", (20, ocr_y), scale=0.4, color=(128, 128, 128)
+        )
+
         q_y = height - 150
-        q_x = width // 2 - 400
-        draw_text(frame, lines[0], (q_x, q_y), color=(255, 255, 255))
+        q_x = 20
+        draw_text(frame, f"Q: {question}", (q_x, q_y), color=(255, 255, 255))
 
-        if len(lines) > 1:
-            a_y = height - 80
-            a_x = width // 2 - 400
-            draw_text(frame, lines[1], (a_x, a_y), color=(0, 255, 255))
+        if model_responses:
+            for i, (model, (answer, time_taken)) in enumerate(model_responses.items()):
+                model_name = model.split("/")[0]
+                a_y = height - 100 + (i * 30)
+                draw_text(
+                    frame,
+                    f"{model_name}: {answer} ({time_taken:.2f}s)",
+                    (q_x, a_y),
+                    color=(0, 255, 255),
+                    scale=0.6,
+                )
 
 
-def process_frame(frame, client):
-    filename = f"capture_{datetime.datetime.now():%Y%m%d_%H%M%S}.jpg"
+async def process_frame(frame, client):
+    filename = f"capture_{time.strftime('%Y%m%d_%H%M%S')}.jpg"
 
     try:
         if not cv2.imwrite(filename, frame):
             raise Exception("Failed to save image")
 
+        start_time = time.perf_counter()
         file = client.files.upload(file=filename)
         detected = client.models.generate_content(
             model="gemini-2.0-flash-001",
@@ -88,38 +213,10 @@ Important: Always start with 'Question:' even for simple questions.""",
         if not question:
             raise Exception("Failed to extract question")
 
-        if options:
-            prompt = f"""Multiple Choice Question:
-{question}
-{options}
+        model_responses = await get_all_model_responses(question, options)
+        total_time = time.perf_counter() - start_time
 
-Instructions:
-1. ONLY respond with the letter (A, B, C, or D) of the correct option
-2. Do not write the full answer or any explanation
-3. Just the letter, nothing else"""
-        else:
-            prompt = f"""Answer this question with EXACTLY one word:
-{question}
-
-Instructions:
-1. If it's a factual question (like capitals, dates, names), give the exact correct answer
-2. The answer must be a single word - no explanations, articles (a/an/the), or additional text
-3. Proper nouns should be capitalized (e.g., Delhi, Paris, Einstein)"""
-
-        answer = (
-            client.models.generate_content(
-                model="gemini-2.0-flash-001",
-                contents=[prompt],
-            )
-            .text.strip()
-            .split()[0]
-        )
-
-        if not answer:
-            raise Exception("Failed to generate answer")
-
-        question_display = f"{question}\n{options}" if options else question
-        return True, f"Q: {question_display}\nA: {answer}"
+        return True, (question, options, detected, model_responses, total_time)
 
     except Exception as e:
         return False, f"Error: {str(e)}"
@@ -140,12 +237,16 @@ class ProcessingThread(Thread):
         self.frame_queue = Queue()
         self.running = True
         self.daemon = True
+        self.loop = asyncio.new_event_loop()
 
     def run(self):
+        asyncio.set_event_loop(self.loop)
         while self.running:
             if not self.frame_queue.empty():
                 frame = self.frame_queue.get()
-                success, result = process_frame(frame, self.client)
+                success, result = self.loop.run_until_complete(
+                    process_frame(frame, self.client)
+                )
                 self.result_queue.put((success, result))
 
     def process(self, frame):
@@ -153,6 +254,7 @@ class ProcessingThread(Thread):
 
     def stop(self):
         self.running = False
+        self.loop.close()
 
 
 def main():
@@ -166,9 +268,13 @@ def main():
     processing_thread = ProcessingThread(result_queue, client)
     processing_thread.start()
 
-    result_text = ""
     status = "Ready"
     is_processing = False
+    current_question = ""
+    current_ocr = ""
+    current_responses = None
+    last_capture_time = 0
+    CAPTURE_COOLDOWN = 1.0  # 1 second cooldown between captures
 
     while True:
         ret, frame = cap.read()
@@ -176,23 +282,45 @@ def main():
             break
 
         if not result_queue.empty():
-            success, new_result = result_queue.get()
+            success, result = result_queue.get()
             status = "Ready" if success else "Error"
             if success:
-                result_text = new_result
+                question, options, ocr_text, model_responses, total_time = result
+                current_question = (
+                    f"{question}\n{options}" if options else f"{question}"
+                )
+                current_ocr = ocr_text
+                current_responses = model_responses
+            else:
+                current_question = result
+                current_ocr = ""
+                current_responses = None
             is_processing = False
 
         display_frame = frame.copy()
-        draw_overlay(display_frame, status, result_text)
+        draw_overlay(
+            display_frame,
+            status,
+            current_question,
+            current_ocr,
+            current_responses,
+        )
         cv2.imshow("Live Camera Feed", display_frame)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
             break
         elif key == ord(" ") and not is_processing:
-            status = "Processing..."
-            is_processing = True
-            processing_thread.process(frame)
+            current_time = time.time()
+            if current_time - last_capture_time >= CAPTURE_COOLDOWN:
+                status = "Processing..."
+                is_processing = True
+                # Clear previous results
+                current_question = ""
+                current_ocr = ""
+                current_responses = None
+                last_capture_time = current_time
+                processing_thread.process(frame)
 
     processing_thread.stop()
     processing_thread.join()
