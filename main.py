@@ -37,7 +37,7 @@ async def get_model_response(
             return False
         if is_mcq:
             return len(ans.strip()) == 1 and ans.strip().upper() in ["A", "B", "C", "D"]
-        return len(ans.split()) == 1
+        return len(ans.split()) <= 5  # Allow up to 5 words for concise answers
 
     try:
         for attempt in range(MAX_RETRIES + 1):
@@ -53,15 +53,16 @@ Instructions:
 
 You must respond with just A, B, C, or D."""
             else:
-                prompt = f"""Answer this question with EXACTLY one word:
+                prompt = f"""Answer this question concisely:
 {question}
 
 Instructions:
 1. If it's a factual question (like capitals, dates, names), give the exact correct answer
-2. The answer MUST be a single word - no explanations, articles (a/an/the), or additional text
+2. The answer must be brief and to the point - avoid explanations or unnecessary words
 3. Proper nouns should be capitalized (e.g., Delhi, Paris, Einstein)
+4. Keep your response very short and focused
 
-You must respond with exactly one word."""
+Your response must be clear and concise."""
 
             try:
                 completion = await asyncio.get_event_loop().run_in_executor(
