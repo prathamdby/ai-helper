@@ -1,6 +1,9 @@
 import asyncio
+import logging
 import os
 import time
+from datetime import datetime
+from pathlib import Path
 from queue import Queue
 from threading import Thread
 from typing import Dict, Tuple
@@ -9,6 +12,14 @@ import cv2
 from dotenv import load_dotenv
 from google import genai
 from openai import OpenAI
+
+logger = logging.getLogger("ai-helper")
+logger.setLevel(logging.DEBUG)
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.DEBUG)
+console_format = logging.Formatter("%(asctime)s - %(levelname)s: %(message)s")
+console_handler.setFormatter(console_format)
+logger.addHandler(console_handler)
 
 load_dotenv()
 
@@ -28,6 +39,7 @@ async def get_model_response(
 ) -> Tuple[bool, str, float]:
     MAX_RETRIES = 2
     start_time = time.perf_counter()
+    logger.info(f"Getting response from model: {model}")
 
     def validate_answer(ans: str, is_mcq: bool) -> bool:
         if not ans:
@@ -62,6 +74,9 @@ Instructions:
 Your response must be clear and concise."""
 
             try:
+                logger.debug(
+                    f"Attempt {attempt + 1}/{MAX_RETRIES + 1} for model {model}"
+                )
                 completion = await asyncio.get_event_loop().run_in_executor(
                     None,
                     lambda: client.chat.completions.create(
@@ -73,13 +88,14 @@ Your response must be clear and concise."""
                             },
                             {"role": "user", "content": prompt},
                         ],
-                        temperature=0.3,  # Lower temperature for more focused responses
+                        temperature=0.3,
                     ),
                 )
                 answer = completion.choices[0].message.content.strip()
 
                 if validate_answer(answer, bool(options)):
                     elapsed_time = time.perf_counter() - start_time
+                    logger.info(f"Valid response from {model} in {elapsed_time:.2f}s")
                     return True, answer.upper() if options else answer, elapsed_time
 
                 if attempt < MAX_RETRIES:
@@ -88,12 +104,14 @@ Your response must be clear and concise."""
                 return True, "Invalid response" if options else "Unknown", elapsed_time
 
             except Exception as e:
+                logger.warning(f"Attempt {attempt + 1} failed for {model}: {str(e)}")
                 if attempt < MAX_RETRIES:
-                    await asyncio.sleep(1)  # Brief delay before retry
+                    await asyncio.sleep(1)
                     continue
                 raise e
     except Exception as e:
         elapsed_time = time.perf_counter() - start_time
+        logger.error(f"All attempts failed for {model}: {str(e)}")
         return False, f"Error ({model.split('/')[-1]}): {str(e)}", elapsed_time
 
 
@@ -179,9 +197,11 @@ def draw_overlay(frame, status="Ready", question="", ocr_text="", model_response
 
 async def process_frame(frame, client):
     filename = f"capture_{time.strftime('%Y%m%d_%H%M%S')}.jpg"
+    logger.info("Starting frame processing")
 
     try:
         if not cv2.imwrite(filename, frame):
+            logger.error("Failed to save captured image")
             raise Exception("Failed to save image")
 
         start_time = time.perf_counter()
@@ -204,10 +224,11 @@ If no question is detected, return empty string.""",
         ).text.strip()
 
         if not detected:
+            logger.warning("No question detected in image")
             raise Exception("No question detected in image")
 
-        # Check if the text actually contains a question structure
         if "Question:" not in detected:
+            logger.warning("Text detected but no question structure found")
             raise Exception("No question found in the image")
 
         question = ""
@@ -219,11 +240,13 @@ If no question is detected, return empty string.""",
                 options = line.replace("Options:", "").strip()
 
         if not question:
+            logger.error("Failed to extract question from detected text")
             raise Exception("Failed to extract question")
 
         model_responses = await get_all_model_responses(question, options)
         total_time = time.perf_counter() - start_time
 
+        logger.info(f"Frame processed successfully in {total_time:.2f}s")
         return True, (question, options, detected, model_responses, total_time)
 
     except Exception as e:
@@ -246,6 +269,7 @@ class ProcessingThread(Thread):
         self.running = True
         self.daemon = True
         self.loop = asyncio.new_event_loop()
+        logger.debug("ProcessingThread initialized")
 
     def run(self):
         asyncio.set_event_loop(self.loop)
@@ -261,15 +285,21 @@ class ProcessingThread(Thread):
         self.frame_queue.put(frame.copy())
 
     def stop(self):
+        logger.info("Stopping processing thread")
         self.running = False
         self.loop.close()
 
 
 def main():
+    logger.info("Starting application")
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     cap.set(cv2.CAP_PROP_FPS, 30)
+
+    if not cap.isOpened():
+        logger.critical("Failed to open camera")
+        return
 
     client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
     result_queue = Queue()
@@ -282,7 +312,7 @@ def main():
     current_ocr = ""
     current_responses = None
     last_capture_time = 0
-    CAPTURE_COOLDOWN = 1.0  # 1 second cooldown between captures
+    CAPTURE_COOLDOWN = 1.0
 
     while True:
         ret, frame = cap.read()
@@ -318,7 +348,7 @@ def main():
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
             break
-        elif key == ord("c"):  # Clear results
+        elif key == ord("c"):
             current_question = ""
             current_ocr = ""
             current_responses = None
@@ -328,13 +358,13 @@ def main():
             if current_time - last_capture_time >= CAPTURE_COOLDOWN:
                 status = "Processing..."
                 is_processing = True
-                # Clear previous results
                 current_question = ""
                 current_ocr = ""
                 current_responses = None
                 last_capture_time = current_time
                 processing_thread.process(frame)
 
+    logger.info("Shutting down application")
     processing_thread.stop()
     processing_thread.join()
     cap.release()
