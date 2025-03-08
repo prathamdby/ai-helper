@@ -114,23 +114,28 @@ Your response must be clear and concise."""
 
 
 async def get_all_model_responses(
-    question: str, options: str
-) -> Dict[str, Tuple[str, float]]:
-    tasks = []
-    for model in MODELS:
-        tasks.append(get_model_response(question, options, model))
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    question: str, options: str, result_queue: Queue
+) -> None:
+    # Initialize responses with "-" for all models
+    responses = {model: ("-", 0.0) for model in MODELS}
+    result_queue.put(("partial", responses.copy()))
 
-    responses = {}
-    for i, result in enumerate(results):
-        model_name = MODELS[i]
+    async def process_model(model):
+        result = await get_model_response(question, options, model)
         if isinstance(result, tuple) and result[0]:
-            responses[model_name] = (result[1], result[2])
+            responses[model] = (result[1], result[2])
         elif isinstance(result, Exception):
-            responses[model_name] = (f"Error: {str(result)}", 0.0)
+            responses[model] = (f"Error: {str(result)}", 0.0)
         else:
-            responses[model_name] = (f"Error: Failed to get response", 0.0)
-    return responses
+            responses[model] = (f"Error: Failed to get response", 0.0)
+        # Send incremental update
+        result_queue.put(("partial", responses.copy()))
+
+    # Create tasks for each model
+    tasks = [process_model(model) for model in MODELS]
+    await asyncio.gather(*tasks)
+    # Send final update
+    result_queue.put(("complete", responses))
 
 
 def draw_text(frame, text, position, color=(255, 255, 255), scale=0.7):
@@ -184,26 +189,43 @@ def draw_overlay(frame, status="Ready", question="", ocr_text="", model_response
             for i, (model, (answer, time_taken)) in enumerate(model_responses.items()):
                 model_name = model.split("/")[0]
                 a_y = height - 100 + (i * 30)
+                # Use different colors and styles for different states (BGR format)
+                if answer == "-":
+                    color = (71, 177, 255)  # Orange for processing (BGR)
+                    time_text = " (Processing...)"
+                elif answer.startswith("Error"):
+                    color = (0, 0, 255)  # Red for errors (BGR)
+                    time_text = ""
+                else:
+                    color = (255, 255, 102)  # Light cyan for successful responses (BGR)
+                    time_text = f" ({time_taken:.2f}s)"
+
                 draw_text(
                     frame,
-                    f"{model_name}: {answer} ({time_taken:.2f}s)",
+                    f"{model_name}: {answer}{time_text}",
                     (q_x, a_y),
-                    color=(0, 255, 255),
+                    color=color,
                     scale=0.6,
                 )
 
 
-async def process_frame(frame, client):
+async def process_frame(frame, client, result_queue):
     filename = f"capture_{time.strftime('%Y%m%d_%H%M%S')}.jpg"
     logger.info("Starting frame processing")
 
     try:
         if not cv2.imwrite(filename, frame):
             logger.error("Failed to save captured image")
-            raise Exception("Failed to save image")
+            result_queue.put(("error", "Failed to save image"))
+            return False
 
         start_time = time.perf_counter()
-        file = client.files.upload(file=filename)
+        try:
+            file = client.files.upload(file=filename)
+        except Exception as e:
+            logger.error(f"Failed to upload file: {str(e)}")
+            result_queue.put(("error", f"Failed to upload file: {str(e)}"))
+            return False
         detected = client.models.generate_content(
             model="gemini-2.0-flash-001",
             contents=[
@@ -241,21 +263,24 @@ If no question is detected, return empty string.""",
             logger.error("Failed to extract question from detected text")
             raise Exception("Failed to extract question")
 
-        model_responses = await get_all_model_responses(question, options)
+        # Send initial update with question and OCR text
+        result_queue.put(("question", (question, options, detected)))
+
+        # Start processing model responses
+        await get_all_model_responses(question, options, result_queue)
         total_time = time.perf_counter() - start_time
-
         logger.info(f"Frame processed successfully in {total_time:.2f}s")
-        return True, (question, options, detected, model_responses, total_time)
-
+        return True
     except Exception as e:
-        return False, f"Error: {str(e)}"
-
+        logger.error(f"Error processing frame: {str(e)}")
+        result_queue.put(("error", str(e)))
+        return False
     finally:
         try:
             if os.path.exists(filename):
                 os.remove(filename)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to remove temporary file: {str(e)}")
 
 
 class ProcessingThread(Thread):
@@ -274,10 +299,15 @@ class ProcessingThread(Thread):
         while self.running:
             if not self.frame_queue.empty():
                 frame = self.frame_queue.get()
-                success, result = self.loop.run_until_complete(
-                    process_frame(frame, self.client)
-                )
-                self.result_queue.put((success, result))
+                try:
+                    success = self.loop.run_until_complete(
+                        process_frame(frame, self.client, self.result_queue)
+                    )
+                    if not success:
+                        logger.error("Frame processing returned False")
+                except Exception as e:
+                    logger.error(f"Error in processing thread: {str(e)}")
+                    self.result_queue.put(("error", f"Processing error: {str(e)}"))
 
     def process(self, frame):
         self.frame_queue.put(frame.copy())
@@ -317,21 +347,25 @@ def main():
         if not ret:
             break
 
-        if not result_queue.empty():
-            success, result = result_queue.get()
-            status = "Ready" if success else "Error"
-            if success:
-                question, options, ocr_text, model_responses, total_time = result
-                current_question = (
-                    f"{question}\n{options}" if options else f"{question}"
-                )
+        while not result_queue.empty():
+            update_type, data = result_queue.get()
+
+            if update_type == "question":
+                question, options, ocr_text = data
+                current_question = f"{question}\n{options}" if options else question
                 current_ocr = ocr_text
-                current_responses = model_responses
-            else:
-                current_question = result
+                status = "Processing responses..."
+            elif update_type == "partial" or update_type == "complete":
+                current_responses = data
+                if update_type == "complete":
+                    status = "Ready"
+                    is_processing = False
+            elif update_type == "error":
+                status = f"Error: {data}"
+                current_question = data
                 current_ocr = ""
                 current_responses = None
-            is_processing = False
+                is_processing = False
 
         display_frame = frame.copy()
         draw_overlay(
