@@ -2,6 +2,10 @@
 
 A computer vision application that captures images through your camera and uses multiple AI models (including Google's Gemini, DeepSeek, and Qwen) to analyze and answer questions in real-time. Perfect for students and educators who want to quickly verify answers or get help with questions.
 
+## 📹 Demo
+
+https://x.com/prathamdby/status/1898830118631637250
+
 ## Features
 
 - Real-time camera feed with OpenCV
