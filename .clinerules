@@ -1,0 +1,69 @@
+# Cline Python Development Guidelines
+
+## General Principles
+
+- Follow your custom instructions for all interactions
+- Create beautiful, production-worthy UI designs (not cookie-cutter)
+- Only add comments when truly necessary
+- Use meaningful spacing between logical code blocks for readability
+- Never be lazy or omit code
+
+## Coding Structure & Style
+
+1. **Plan First**
+
+   - Write clear pseudocode before implementation
+   - Break complex problems into logical steps
+
+2. **Follow PEP 8**
+
+   - Use 4-space indentation
+   - Limit lines to 79-88 characters
+   - Use descriptive snake_case naming
+
+3. **Organize Code**
+
+   - Structure imports: standard → third-party → local
+   - Group related functionality in classes/modules
+   - Write docstrings for all functions, classes, modules
+
+4. **Handle Errors**
+
+   - Use appropriate try/except blocks
+   - Create custom exceptions when needed
+   - Validate all function inputs
+
+5. **Prioritize Readability**
+
+   - Favor clarity over cleverness
+   - Comment complex logic only
+   - Use type hints consistently
+
+6. **Test Thoroughly**
+
+   - Write unit tests for all functions
+   - Cover edge cases
+   - Use pytest or unittest framework
+
+7. **Leverage Python Features**
+
+   - Use list comprehensions and generators appropriately
+   - Utilize built-in functions (map, filter, zip)
+   - Prefer standard libraries over external dependencies
+
+8. **Optimize Data Handling**
+
+   - Choose appropriate data structures
+   - Consider performance implications
+   - Use NumPy for performance-critical numerical operations
+
+9. **Implement Security**
+
+   - Sanitize all inputs
+   - Never hardcode sensitive information
+   - Avoid eval() and exec()
+
+10. **Use Modern Python**
+    - Prefer f-strings for formatting
+    - Use walrus operator (:=) when appropriate
+    - Apply structural pattern matching for complex conditionals
